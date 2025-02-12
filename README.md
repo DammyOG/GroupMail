@@ -15,11 +15,11 @@ Secure API Handling: Uses environment variables (.env) to keep API keys private.
 ## 🚀 Setup
 
 Clone the repo
+
 `git clone https://github.com/yourusername/gmail-grouping-extension.git
 cd gmail-grouping-extension`
-Install dependencies
 
-`npm install`
+Then run `npm install`
 
 Create a .env file and add your API keys:
 
@@ -28,13 +28,13 @@ GMAIL_CLIENT_ID=your_gmail_client_id`
 
 Load the extension in Chrome
 
-Go to chrome://extensions/
+Go to [chrome://extensions/]chrome://extensions/
 
 Enable "Developer Mode"
 
 Click "Load Unpacked" and select the extension folder.
 
-### 🛠 Tech Stack
+## 🛠 Tech Stack
 
 JavaScript (ES6+)
 
