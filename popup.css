@@ -1,0 +1,66 @@
+/* Apply full viewport height and width for centering */
+body {
+    width: 500px;
+    height: 300px;
+    margin: 0;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    font-family: Arial, sans-serif;
+    background-color: #f5eded; /* Optional background color */
+}
+
+/* Center the container for buttons */
+.container {
+    margin: 5px;
+    padding: 5px;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px; /* Space between buttons */
+}
+
+#message {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 5px;
+}
+
+/* Button styling */
+button {
+    padding: 10px 20px;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #4285f4;
+    color: white;
+    transition: background-color 0.3s ease;
+}
+
+button:disabled {
+    background-color: #b0bec5; /* Disabled button color */
+    cursor: not-allowed;
+}
+
+button:hover:not(:disabled) {
+    background-color: #357ae8;
+}
+
+/* Style for the heading */
+h1 {
+    margin-bottom: 10px;
+    font-size: 24px;
+    color: #333;
+    text-align: center;
+}
+
+h2 {
+    margin-bottom: 5px;
+    font-size: 18px;
+    color: #333;
+}
