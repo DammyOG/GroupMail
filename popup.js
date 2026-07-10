@@ -3,40 +3,22 @@ import {
   getEmails,
   clearToken,
   fetchUserProfile,
-  displayCategorizedEmails,
   getEmailDetails,
   suggestLabelWithRateLimiting,
   getOrCreateLabel,
   addLabelToEmail,
 } from "./src/gmail_api.js";
-import { suggestLabel } from "./src/openai_api.js";
-import { labelEmails } from "./src/labeler.js";
+import { getSettings } from "./src/storage.js";
+import {
+  getProcessedEmailIds,
+  addProcessedEmailId,
+  clearProcessedEmailIds,
+} from "./src/processedIds.js";
 
 document.addEventListener("DOMContentLoaded", () => {
-  function syncChromeStorageToLocalStorage() {
-    chrome.storage.local.get(null, (items) => {
-      if (chrome.runtime.lastError) {
-        console.error(
-          "Error fetching chrome.storage.local data:",
-          chrome.runtime.lastError
-        );
-        return;
-      }
-
-      // Iterate through all keys in chrome.storage.local
-      for (const [key, value] of Object.entries(items)) {
-        // Store each key-value pair in localStorage
-        localStorage.setItem(key, JSON.stringify(value));
-      }
-
-      console.log("Synced chrome.storage.local to localStorage.");
-    });
-  }
-
-  syncChromeStorageToLocalStorage();
-
   const signInButton = document.getElementById("sign-in");
   const signOutButton = document.getElementById("sign-out");
+  const settingsButton = document.getElementById("settings");
   const messageDiv = document.getElementById("message");
   const emailResults = document.getElementById("email-results");
   const clearLabelsButton = document.getElementById("clear-labels");
@@ -44,11 +26,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let authToken = null;
 
+  settingsButton.addEventListener("click", () => {
+    chrome.runtime.openOptionsPage();
+  });
+
+  function showOpenSettingsPrompt(text) {
+    messageDiv.innerHTML = `<p>${text}</p><button id="open-settings-inline">Open Settings</button>`;
+    document
+      .getElementById("open-settings-inline")
+      .addEventListener("click", () => chrome.runtime.openOptionsPage());
+  }
+
   // Sign-in to Gmail
   async function signIn() {
     try {
-      console.log("A button was clicked");
-      authToken = await getGmailService();
+      authToken = await getGmailService(true);
       messageDiv.textContent = "Signed in successfully!";
 
       const firstName = await fetchUserProfile(authToken);
@@ -63,13 +55,12 @@ document.addEventListener("DOMContentLoaded", () => {
   async function signOut() {
     try {
       await clearToken();
-      console.log("All cached tokens cleared.");
       signInButton.style.display = "block";
       clearLabelsButton.style.display = "none";
+      clearAllButton.style.display = "none";
       signOutButton.style.display = "none";
       messageDiv.innerHTML = "";
-      const body = document.body;
-      body.style.justifyContent = "center";
+      document.body.style.justifyContent = "center";
       emailResults.textContent = "";
     } catch (error) {
       console.error("Error signing out:", error);
@@ -78,39 +69,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
   signOutButton.addEventListener("click", signOut);
 
-  // Fetch and Categorize Emails
   function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  function getProcessedEmailIds() {
-    const storedIds = localStorage.getItem("processedEmailIds");
-    return storedIds ? JSON.parse(storedIds) : [];
-  }
-
-  function addProcessedEmailId(id) {
-    const processedIds = getProcessedEmailIds();
-    processedIds.push(id);
-    localStorage.setItem("processedEmailIds", JSON.stringify(processedIds));
-  }
-
-  function clearProcessedEmailIds() {
-    localStorage.removeItem("processedEmailIds");
-    chrome.storage.local.remove("processedEmailIds", () => {
-      if (chrome.runtime.lastError) {
-        console.error(
-          "Error clearing processed email IDs:",
-          chrome.runtime.lastError
-        );
-      } else {
-        console.log("Processed email IDs cleared from chrome.storage.local.");
-      }
-    });
   }
 
   async function fetchAndCategorizeEmails() {
     try {
       if (!authToken) throw new Error("You need to sign in first.");
+
+      const { openaiApiKey } = await getSettings();
+      if (!openaiApiKey) {
+        showOpenSettingsPrompt(
+          "No OpenAI API key configured yet. Add one to start grouping emails."
+        );
+        return;
+      }
 
       messageDiv.textContent = "Fetching emails...";
       const emails = await getEmails(authToken);
@@ -120,7 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      const processedEmailIds = getProcessedEmailIds();
+      const processedEmailIds = await getProcessedEmailIds();
       const unprocessedEmails = emails.filter(
         (email) => !processedEmailIds.includes(email.id)
       );
@@ -132,46 +105,49 @@ document.addEventListener("DOMContentLoaded", () => {
 
       messageDiv.textContent = `Categorizing ${unprocessedEmails.length} emails...`;
 
+      let succeeded = 0;
+      let failed = 0;
+
       for (const email of unprocessedEmails) {
         const { id } = email;
-        const emailDetails = await getEmailDetails(authToken, id);
+        try {
+          const emailDetails = await getEmailDetails(authToken, id);
+          if (!emailDetails) continue;
 
-        if (emailDetails) {
           const { subject, body } = emailDetails;
 
-          // Suggest label
           const label = await suggestLabelWithRateLimiting(subject, body);
-
-          // Show progress in the UI
           messageDiv.textContent = `Processing: "${subject}"\nApplying Label: "${label}"`;
 
-          // Get or create label in Gmail
           const labelId = await getOrCreateLabel(authToken, label);
-
-          // Add label to email
           await addLabelToEmail(authToken, id, labelId);
+          await addProcessedEmailId(id);
 
-          // Mark email as processed
-          addProcessedEmailId(id);
-
-          console.log(`Added label "${label}" to email "${subject}"`);
-
-          // Delay to simulate processing
-          await delay(1000); // 1-second delay between each email
+          succeeded++;
+          await delay(1000); // stay under OpenAI/Gmail rate limits
+        } catch (error) {
+          console.error(`Error processing email ${id}:`, error);
+          failed++;
+          // Stop immediately on a missing/invalid API key; there's no point
+          // retrying the rest of the batch.
+          if (/API key/i.test(error.message)) {
+            showOpenSettingsPrompt(error.message);
+            return;
+          }
         }
       }
 
-      messageDiv.textContent = "Email categorization completed.";
+      messageDiv.textContent = `Email categorization completed. Labeled ${succeeded}, failed ${failed}.`;
     } catch (error) {
       console.error("Error fetching or categorizing emails:", error);
       messageDiv.textContent = `Error: ${error.message}`;
     }
   }
 
-  //   Initialize auth
+  // Initialize auth
   async function initializeAuth() {
     try {
-      authToken = await getGmailService();
+      authToken = await getGmailService(false);
       const firstName = await fetchUserProfile(authToken);
       updateUiAfterSignIn(firstName);
     } catch (error) {
@@ -191,13 +167,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.body.style.justifyContent = "space-between";
 
-    // Attach event handler for grouping emails
     const groupEmailsButton = document.getElementById("group-emails");
     groupEmailsButton.addEventListener("click", fetchAndCategorizeEmails);
 
     signInButton.style.display = "none";
     signOutButton.style.display = "block";
     clearLabelsButton.style.display = "block";
+    clearAllButton.style.display = "block";
   }
 
   async function clearAll(
@@ -205,11 +181,10 @@ document.addEventListener("DOMContentLoaded", () => {
     maxLabelsToClear = 250,
     maxEmailsPerLabel = 100
   ) {
-    const processedLabels = []; // Collect processed labels
-    const failedLabels = []; // Collect labels that failed to process
+    const processedLabels = [];
+    const failedLabels = [];
 
     try {
-      // Fetch all labels
       const response = await fetch(
         "https://www.googleapis.com/gmail/v1/users/me/labels",
         {
@@ -224,9 +199,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       const data = await response.json();
-      const labels = data.labels;
+      const labels = data.labels || [];
 
-      console.log(`Found ${labels.length} labels.`);
       messageDiv.textContent = `Found ${labels.length} labels. Processing...`;
 
       // Exclude core Gmail labels
@@ -256,20 +230,14 @@ document.addEventListener("DOMContentLoaded", () => {
           !coreLabels.includes(label.name.toUpperCase())
       );
 
-      console.log(
-        "Labels to process:",
-        labelsToProcess.map((label) => label.name)
-      );
-
-      // Process labels
       for (const label of labelsToProcess.slice(0, maxLabelsToClear)) {
-        console.log(`Processing label: ${label.name} (ID: ${label.id})`);
         messageDiv.textContent = `Processing label: ${label.name}`;
 
         try {
-          // Fetch emails with this label
           const messagesResponse = await fetch(
-            `https://www.googleapis.com/gmail/v1/users/me/messages?q=label:${label.name}`,
+            `https://www.googleapis.com/gmail/v1/users/me/messages?q=label:${encodeURIComponent(
+              label.name
+            )}`,
             {
               headers: {
                 Authorization: `Bearer ${authToken}`,
@@ -281,11 +249,6 @@ document.addEventListener("DOMContentLoaded", () => {
           const messages = messagesData.messages || [];
 
           if (messages.length > 0) {
-            console.log(
-              `Found ${messages.length} emails for label "${label.name}". Processing emails.`
-            );
-
-            // Remove label from emails
             const emailIds = messages
               .slice(0, maxEmailsPerLabel)
               .map((msg) => msg.id);
@@ -305,18 +268,10 @@ document.addEventListener("DOMContentLoaded", () => {
             );
 
             if (!batchModifyResponse.ok) {
-              console.error(
-                `Failed to remove label from emails for label ${label.name}: ${batchModifyResponse.statusText}`
-              );
               messageDiv.textContent = `Failed to remove label from emails for label: ${label.name}`;
-            } else {
-              console.log(
-                `Removed label "${label.name}" from ${emailIds.length} emails.`
-              );
             }
           }
 
-          // Delete the label
           const deleteLabelResponse = await fetch(
             `https://www.googleapis.com/gmail/v1/users/me/labels/${label.id}`,
             {
@@ -328,14 +283,8 @@ document.addEventListener("DOMContentLoaded", () => {
           );
 
           if (!deleteLabelResponse.ok) {
-            const errorDetails = await deleteLabelResponse.json();
-            console.error(
-              `Failed to delete label ${label.name}: ${deleteLabelResponse.statusText}`,
-              errorDetails
-            );
             failedLabels.push(label.name);
           } else {
-            console.log(`Deleted label: ${label.name}`);
             processedLabels.push(label.name);
             messageDiv.textContent = `Deleted label: ${label.name}`;
           }
@@ -345,33 +294,22 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      // Final summary
-      //       messageDiv.textContent = `Processing of labels completed.
-      //   Processed labels: ${processedLabels.join(", ")}
-      //   ${
-      //     failedLabels.length > 0
-      //       ? `Failed to process labels: ${failedLabels.join(", ")}`
-      //       : ""
-      //   }`;
-      messageDiv.textContent = `Processing of labels completed`;
-      console.log("Processing of labels completed.");
+      messageDiv.textContent = `Processing of labels completed. Deleted ${processedLabels.length}, failed ${failedLabels.length}.`;
     } catch (error) {
       console.error("Error in clearAll:", error);
       messageDiv.textContent = `Error in clearAll: ${error.message}`;
     }
   }
 
-  clearLabelsButton.addEventListener("click", () => {
-    clearProcessedEmailIds();
+  clearLabelsButton.addEventListener("click", async () => {
+    await clearProcessedEmailIds();
     clearAll(authToken, 10, 20);
   });
 
-  clearAllButton.addEventListener("click", () => {
-    clearProcessedEmailIds();
+  clearAllButton.addEventListener("click", async () => {
+    await clearProcessedEmailIds();
     clearAll(authToken, 250, 100);
   });
 
   initializeAuth();
-  //   getEmail();
-  //   getEmailDetails("19383d049a73ada7");
 });

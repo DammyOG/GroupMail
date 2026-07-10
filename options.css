@@ -1,0 +1,58 @@
+body {
+    max-width: 480px;
+    margin: 40px auto;
+    padding: 0 20px;
+    font-family: Arial, sans-serif;
+    color: #333;
+}
+
+h1 {
+    font-size: 22px;
+    margin-bottom: 20px;
+}
+
+#settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+label {
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+input, select {
+    padding: 8px;
+    font-size: 14px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+button {
+    margin-top: 16px;
+    padding: 10px 20px;
+    font-size: 15px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    background-color: #4285f4;
+    color: white;
+    align-self: flex-start;
+}
+
+button:hover {
+    background-color: #357ae8;
+}
+
+#status {
+    color: #1a7f37;
+    font-weight: bold;
+    min-height: 20px;
+}
+
+.hint {
+    font-size: 13px;
+    color: #666;
+    line-height: 1.5;
+}

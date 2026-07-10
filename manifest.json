@@ -2,32 +2,30 @@
   "manifest_version": 3,
   "name": "Gmail Group",
   "version": "1.0.0",
-  "description": "Organize Gmail emails into groups based on content. This is currently in development",
-  "permissions": ["identity", "storage", "alarms", "background"],
+  "description": "Organize Gmail emails into groups based on content, using AI-suggested labels.",
+  "permissions": ["identity", "storage", "alarms"],
   "oauth2": {
-    "client_id": "169400956954-gjqc4a4o69q5qlv7787t19b9vs363e2l.apps.googleusercontent.com",
+    "client_id": "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.profile",
-      "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/gmail.labels",
-      "https://www.googleapis.com/auth/contacts.readonly",
-      "https://www.googleapis.com/auth/gmail.modify",
-      "https://www.googleapis.com/auth/gmail.settings.basic"
+      "https://www.googleapis.com/auth/gmail.modify"
     ]
   },
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-
   "action": {
     "default_popup": "popup.html"
   },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "host_permissions": [
-    "https://gmail.googleapis.com/*",
-    "https://*.googleapis.com/",
     "https://www.googleapis.com/*",
-    "https://*/*",
-    "http://*/*"
+    "https://people.googleapis.com/*",
+    "https://api.openai.com/*"
   ]
 }

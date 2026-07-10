@@ -5,30 +5,17 @@ import {
   getOrCreateLabel,
 } from "./src/gmail_api.js";
 import { suggestLabel } from "./src/openai_api.js";
-
-function getProcessedEmailIds() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get("processedEmailIds", (result) => {
-      console.log("Stored processed email IDs:", result);
-      resolve(result.processedEmailIds || []); // Return empty array if no data
-    });
-  });
-}
-
-async function addProcessedEmailId(id) {
-  const processedIds = await getProcessedEmailIds(); // Ensure processedIds is always an array
-  if (!Array.isArray(processedIds)) {
-    console.error(
-      "processedEmailIds is not an array. Resetting to an empty array."
-    );
-    processedIds = [];
-  }
-  processedIds.push(id);
-  chrome.storage.local.set({ processedEmailIds: processedIds });
-}
+import { getSettings } from "./src/storage.js";
+import { getProcessedEmailIds, addProcessedEmailId } from "./src/processedIds.js";
 
 async function pollForNewEmails(authToken) {
   try {
+    const { openaiApiKey } = await getSettings();
+    if (!openaiApiKey) {
+      console.log("No OpenAI API key configured yet; skipping auto-poll.");
+      return;
+    }
+
     const response = await fetch(
       "https://www.googleapis.com/gmail/v1/users/me/messages?q=is:unread&labelIds=INBOX",
       {
@@ -48,14 +35,10 @@ async function pollForNewEmails(authToken) {
 
     for (const message of data.messages) {
       if (processedEmailIds.includes(message.id)) {
-        console.log(`Email ID ${message.id} already processed.`);
         continue; // Skip already processed emails
       }
 
-      console.log("New unread email detected:", message);
-      await processNewEmail(authToken, message.id); // Process the new email
-
-      // Mark as processed
+      await processNewEmail(authToken, message.id);
       await addProcessedEmailId(message.id);
     }
   } catch (error) {
@@ -70,13 +53,8 @@ async function processNewEmail(authToken, emailId) {
     if (emailDetails) {
       const { subject, body } = emailDetails;
 
-      // Suggest a label
       const label = await suggestLabel(subject, body);
-
-      // Get or create the label
       const labelId = await getOrCreateLabel(authToken, label);
-
-      // Add the label to the email
       await addLabelToEmail(authToken, emailId, labelId);
 
       console.log(`Grouped email "${subject}" under label "${label}".`);
@@ -92,15 +70,14 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === "pollEmails") {
-    console.log("Polling Gmail for new emails...");
-    const authToken = await getGmailService();
-    pollForNewEmails(authToken);
-  }
-
-  if (alarm.name === "firstOn") {
-    console.log("Polling Gmail for new emails...");
-    const authToken = await getGmailService();
-    pollForNewEmails(authToken);
+  if (alarm.name === "pollEmails" || alarm.name === "firstOn") {
+    try {
+      // Non-interactive: silently skip if the user isn't signed in rather
+      // than popping an auth window during a background alarm.
+      const authToken = await getGmailService(false);
+      await pollForNewEmails(authToken);
+    } catch (error) {
+      console.log("Skipping auto-poll (not signed in):", error.message);
+    }
   }
 });

@@ -1,10 +1,12 @@
 import { suggestLabel } from "./openai_api.js";
 
-export async function getGmailService() {
+export async function getGmailService(interactive = true) {
   return new Promise((resolve, reject) => {
-    chrome.identity.getAuthToken({ interactive: true }, (token) => {
+    chrome.identity.getAuthToken({ interactive }, (token) => {
       if (chrome.runtime.lastError || !token) {
-        reject(new Error("User is not signed in."));
+        reject(
+          new Error(chrome.runtime.lastError?.message || "User is not signed in.")
+        );
       } else {
         resolve(token);
       }
@@ -63,26 +65,6 @@ export async function fetchUserProfile(token) {
   }
 }
 
-// Display categorized emails
-export async function displayCategorizedEmails(
-  emails,
-  emailResults,
-  messageDiv
-) {
-  emailResults.textContent = ""; // Clear previous results
-  emails.forEach((email) => {
-    const emailElement = document.createElement("div");
-    emailElement.innerHTML = `
-        <p><strong>Subject:</strong> ${email.subject}</p>
-        <p><strong>Email:</strong> ${email.body.substring(0, 50)}...</p>
-        <strong>Label: ${email.label}</strong>
-      `;
-    emailResults.appendChild(emailElement);
-  });
-
-  messageDiv.textContent = "Emails categorized successfully!";
-}
-
 export async function getEmailDetails(authToken, id) {
   const response = await fetch(
     `https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
@@ -118,9 +100,7 @@ export async function getEmailDetails(authToken, id) {
   const truncatedBody =
     body.length > 1000 ? `${body.substring(0, 1000)}...` : body;
 
-  console.log(subject, truncatedBody);
-
-  return { subject, truncatedBody };
+  return { subject, body: truncatedBody };
 }
 
 function delay(ms) {

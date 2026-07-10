@@ -1,4 +1,4 @@
-import { OPENAI_API_KEY } from "./config.js";
+import { getSettings } from "./storage.js";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,11 +59,19 @@ const predefinedLabels = [
 ];
 
 export async function suggestLabel(subject, body) {
+  const { openaiApiKey, model } = await getSettings();
+
+  if (!openaiApiKey) {
+    throw new Error(
+      "No OpenAI API key configured. Open the extension's Settings page and add one."
+    );
+  }
+
   const prompt = `
       Here is an email:
       Subject: ${subject}
       Body: ${body}
-      
+
       Based on the content, select the **most appropriate** label from this predefined list:
       ${predefinedLabels.join(", ")}.
 
@@ -81,10 +89,10 @@ export async function suggestLabel(subject, body) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${OPENAI_API_KEY}`,
+            Authorization: `Bearer ${openaiApiKey}`,
           },
           body: JSON.stringify({
-            model: "gpt-4o",
+            model: model || "gpt-4o-mini",
             messages: [{ role: "user", content: prompt }],
             max_tokens: 10,
           }),
@@ -102,6 +110,10 @@ export async function suggestLabel(subject, body) {
           console.warn("Unexpected label received, defaulting to 'Updates'");
           return "Updates"; // Default fallback label
         }
+      } else if (response.status === 401) {
+        throw new Error(
+          "OpenAI rejected the API key (401). Check the key in Settings."
+        );
       } else if (response.status === 429) {
         console.warn("Rate limit exceeded. Retrying...");
         const retryAfter =
