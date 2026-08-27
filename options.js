@@ -7,6 +7,7 @@ const openaiApiKeyInput = document.getElementById("openai-api-key");
 const openaiModelSelect = document.getElementById("openai-model");
 const anthropicApiKeyInput = document.getElementById("anthropic-api-key");
 const anthropicModelSelect = document.getElementById("anthropic-model");
+const anthropicWorkspaceIdInput = document.getElementById("anthropic-workspace-id");
 const status = document.getElementById("status");
 
 const resetButton = document.getElementById("reset-tracking");
@@ -19,12 +20,13 @@ async function load() {
   openaiModelSelect.value = settings.openaiModel;
   anthropicApiKeyInput.value = settings.anthropicApiKey || "";
   anthropicModelSelect.value = settings.anthropicModel;
+  anthropicWorkspaceIdInput.value = settings.anthropicWorkspaceId || "";
   await refreshResetStatus();
 }
 
 async function refreshResetStatus() {
   const ids = await getProcessedEmailIds();
-  resetStatus.textContent = `Currently tracking ${ids.length} email(s) as already grouped.`;
+  resetStatus.textContent = `Currently tracking ${ids.size} email(s) as already grouped.`;
 }
 
 form.addEventListener("submit", async (event) => {
@@ -35,6 +37,7 @@ form.addEventListener("submit", async (event) => {
     openaiModel: openaiModelSelect.value,
     anthropicApiKey: anthropicApiKeyInput.value.trim(),
     anthropicModel: anthropicModelSelect.value,
+    anthropicWorkspaceId: anthropicWorkspaceIdInput.value.trim(),
   });
   status.textContent = "Settings saved.";
   setTimeout(() => {

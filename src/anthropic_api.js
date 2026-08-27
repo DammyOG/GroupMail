@@ -5,7 +5,10 @@ import {
 } from "./labels.js";
 import { NonRetryableError, RetryableError, withRetries } from "./retry.js";
 
-export async function suggestLabelAnthropic(email, { anthropicApiKey, anthropicModel }) {
+export async function suggestLabelAnthropic(
+  email,
+  { anthropicApiKey, anthropicModel, anthropicWorkspaceId }
+) {
   if (!anthropicApiKey) {
     throw new NonRetryableError(
       "No Anthropic API key configured. Open the extension's Settings page and add one."
@@ -14,20 +17,29 @@ export async function suggestLabelAnthropic(email, { anthropicApiKey, anthropicM
 
   const prompt = buildLabelPrompt(email);
 
+  const headers = {
+    "Content-Type": "application/json",
+    "x-api-key": anthropicApiKey,
+    "anthropic-version": "2023-06-01",
+    // Extension pages call this API directly from the browser (no
+    // build step / server to proxy through), which Anthropic
+    // otherwise blocks via CORS.
+    "anthropic-dangerous-direct-browser-access": "true",
+  };
+
+  // Identity-linked keys are not scoped to a workspace, so Anthropic
+  // rejects them unless the request says which workspace to bill.
+  // Workspace-scoped keys carry that implicitly and must not send it.
+  if (anthropicWorkspaceId) {
+    headers["anthropic-workspace-id"] = anthropicWorkspaceId;
+  }
+
   const rawLabel = await withRetries(async () => {
     let response;
     try {
       response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicApiKey,
-          "anthropic-version": "2023-06-01",
-          // Extension pages call this API directly from the browser (no
-          // build step / server to proxy through), which Anthropic
-          // otherwise blocks via CORS.
-          "anthropic-dangerous-direct-browser-access": "true",
-        },
+        headers,
         body: JSON.stringify({
           model: anthropicModel || "claude-haiku-4-5",
           max_tokens: 10,
@@ -50,9 +62,19 @@ export async function suggestLabelAnthropic(email, { anthropicApiKey, anthropicM
     }
 
     if (response.status === 400) {
-      throw new NonRetryableError(
-        `Anthropic rejected the request: ${await response.text()}`
-      );
+      const body = await response.text();
+
+      // Turn Anthropic's raw JSON for this one into something that says
+      // what to actually do about it.
+      if (body.includes("anthropic-workspace-id")) {
+        throw new NonRetryableError(
+          "This Anthropic API key is identity-linked, so it needs a " +
+            "Workspace ID. Add one in Settings (Console \u2192 Settings \u2192 " +
+            "Workspaces, the wrkspc_... value)."
+        );
+      }
+
+      throw new NonRetryableError(`Anthropic rejected the request: ${body}`);
     }
 
     if (response.status === 429) {

@@ -12,6 +12,9 @@ const DEFAULTS = {
   openaiModel: DEFAULT_OPENAI_MODEL,
   anthropicApiKey: "",
   anthropicModel: DEFAULT_ANTHROPIC_MODEL,
+  // Only required for identity-linked keys, which Anthropic rejects
+  // unless the request names the workspace it bills to.
+  anthropicWorkspaceId: "",
 };
 
 export async function getSettings() {
@@ -32,10 +35,18 @@ export async function saveSettings({
   openaiModel,
   anthropicApiKey,
   anthropicModel,
+  anthropicWorkspaceId,
 }) {
   return new Promise((resolve, reject) => {
     chrome.storage.sync.set(
-      { provider, openaiApiKey, openaiModel, anthropicApiKey, anthropicModel },
+      {
+        provider,
+        openaiApiKey,
+        openaiModel,
+        anthropicApiKey,
+        anthropicModel,
+        anthropicWorkspaceId,
+      },
       () => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));

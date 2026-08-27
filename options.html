@@ -34,6 +34,17 @@
             <label for="anthropic-api-key">Anthropic API key</label>
             <input type="password" id="anthropic-api-key" placeholder="sk-ant-..." autocomplete="off">
 
+            <label for="anthropic-workspace-id">Workspace ID <span class="optional">(only for identity-linked keys)</span></label>
+            <input type="text" id="anthropic-workspace-id" placeholder="wrkspc_..." autocomplete="off">
+            <p class="hint">
+                Leave blank unless Anthropic answers
+                <em>"anthropic-workspace-id is required when authenticating
+                with an identity-linked API key"</em>. Find the ID in the
+                Console under Settings &rarr; Workspaces — open the
+                workspace and copy the <code>wrkspc_...</code> value from
+                the address bar.
+            </p>
+
             <label for="anthropic-model">Model</label>
             <select id="anthropic-model">
                 <option value="claude-haiku-4-5">Claude Haiku 4.5 (recommended, cheapest)</option>

@@ -133,6 +133,12 @@ a payment method on the account before the API will work at all.
 - **Read emails aren't being labeled**: the default scope is "Unread only".
   Switch the popup's *Scope* to "Inbox (read + unread)" and raise *Go back*
   before clicking Group Emails.
+- **"identity-linked API key" error from Anthropic**: your key isn't
+  scoped to a single workspace, so Anthropic needs to be told which one
+  to bill. Open **Settings**, paste the `wrkspc_...` value into
+  **Workspace ID**, and save. Find it in the Console under Settings
+  &rarr; Workspaces. Leave the field blank for ordinary
+  workspace-scoped keys.
 - **"bad client id" on sign-in**: your OAuth client ID (step 2/3 above)
   doesn't match this extension's current ID — reload the unpacked
   extension, confirm the ID, and re-check the client in Google Cloud

@@ -88,3 +88,8 @@ h2 {
     color: #666;
     min-height: 18px;
 }
+
+.optional {
+    font-weight: normal;
+    color: #666;
+}
