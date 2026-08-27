@@ -1,4 +1,5 @@
 import { getSettings, saveSettings } from "./src/storage.js";
+import { BUILD_ID } from "./src/buildId.js";
 import { getProcessedEmailIds, clearProcessedEmailIds } from "./src/processedIds.js";
 
 const form = document.getElementById("settings-form");
@@ -10,7 +11,26 @@ const anthropicModelSelect = document.getElementById("anthropic-model");
 const anthropicWorkspaceIdInput = document.getElementById("anthropic-workspace-id");
 const status = document.getElementById("status");
 
+const staleWorkerBanner = document.getElementById("stale-worker");
 const resetButton = document.getElementById("reset-tracking");
+
+// This page is read from disk every time it opens; the background service
+// worker is not. When they disagree, changes made here silently have no
+// effect on labeling, which looks exactly like the fix not working.
+function checkWorkerIsCurrent() {
+  chrome.runtime.sendMessage({ type: "GET_BUILD_ID" }, (response) => {
+    // A worker too old to know this message type answers nothing, which
+    // sets lastError — that is itself the stale signal.
+    const workerBuild = chrome.runtime.lastError ? null : response?.buildId;
+    if (workerBuild === BUILD_ID) return;
+
+    staleWorkerBanner.hidden = false;
+    staleWorkerBanner.textContent =
+      `The background worker is running older code (${workerBuild || "pre-2026-08-27.4"}) ` +
+      `than this page (${BUILD_ID}), so changes saved here will not affect labeling. ` +
+      `Open chrome://extensions and click Reload on Gmail Group, then reopen Settings.`;
+  });
+}
 const resetStatus = document.getElementById("reset-status");
 
 async function load() {
@@ -52,4 +72,5 @@ resetButton.addEventListener("click", async () => {
   resetStatus.textContent = "Tracking reset. " + original;
 });
 
+checkWorkerIsCurrent();
 load();

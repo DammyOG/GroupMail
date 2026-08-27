@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gmail Group",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Organize Gmail emails into groups based on content, using AI-suggested labels.",
   "permissions": ["identity", "storage", "alarms"],
   "oauth2": {

@@ -13,6 +13,7 @@ import {
   addProcessedEmailIds,
   clearProcessedEmailIds,
 } from "./src/processedIds.js";
+import { BUILD_ID } from "./src/buildId.js";
 import {
   DEFAULT_LIMIT,
   DEFAULT_SCOPE,
@@ -429,6 +430,14 @@ async function runClearJob(maxLabelsToClear, maxEmailsPerLabel) {
 // ---------------------------------------------------------------------
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Lets the Settings page detect that this worker is running older code
+  // than the files on disk. Answering also wakes an idle worker, so the
+  // reply reflects a real running worker rather than a cached value.
+  if (message?.type === "GET_BUILD_ID") {
+    sendResponse({ buildId: BUILD_ID });
+    return false;
+  }
+
   if (message?.type === "START_GROUPING") {
     runGroupingJob(message.scope, message.limit);
     sendResponse({ started: true });
