@@ -9,6 +9,15 @@
 <body>
     <h1>Group Mail</h1>
     <div id="message"></div>
+    <div id="job-options" class="options" style="display:none">
+        <label for="scope">Scope</label>
+        <select id="scope"></select>
+        <label for="limit">Go back</label>
+        <span class="limit-field">
+            <input id="limit" type="number" min="1" step="10" />
+            <span>emails</span>
+        </span>
+    </div>
     <div class="container">
         <button id="sign-in">Sign-in</button>
         <button id="sign-out" style="display:none">Sign-out</button>

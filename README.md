@@ -1,7 +1,7 @@
 # Group Mail
 
 A Chrome extension (Manifest V3) that automatically organizes your Gmail
-inbox by applying AI-suggested labels to unread emails, using OpenAI's API
+inbox by applying AI-suggested labels, using OpenAI's or Anthropic's API
 and the Gmail API. It also polls in the background every 15 minutes so new
 mail gets labeled without you opening the popup.
 
@@ -9,6 +9,9 @@ mail gets labeled without you opening the popup.
 
 - **AI-powered labeling** — picks the best-fit label for each email from a
   built-in list of ~50 categories (Work, Finance, Travel, Newsletters, etc.).
+- **Choose what to label** — the popup's *Scope* control covers unread mail
+  only or your whole inbox (read included), and *Go back N emails* sets how
+  far into the backlog a run reaches (up to 2000).
 - **Background auto-labeling** — polls unread mail every 15 minutes.
 - **Label cleanup** — "Clear Labels" / "Clear All" remove labels this
   extension created, without touching Gmail's built-in system labels.
@@ -84,9 +87,15 @@ a payment method on the account before the API will work at all.
 
 - Click the extension icon and **Sign-in** with the Google account you
   added as a test user.
-- Click **Group Emails** to label your current unread mail.
-- After that, unread mail is labeled automatically every 15 minutes in the
-  background — no need to keep the popup open.
+- Pick a **Scope** ("Unread only" or "Inbox (read + unread)") and how many
+  emails to **go back**, then click **Group Emails**. Both choices are
+  remembered for next time.
+- Emails already labeled by a previous run are skipped, so raising the
+  count later only pays for the new ones.
+- After that, newly-arrived *unread* mail is labeled automatically every 15
+  minutes in the background — no need to keep the popup open. The
+  background poll is always unread-only regardless of the scope you pick
+  for manual runs.
 - **Clear Labels** removes labels from a small batch (useful for testing);
   **Clear All** removes labels from everything this extension has created.
 
@@ -99,9 +108,11 @@ a payment method on the account before the API will work at all.
 
 ## 🔒 Notes on data & privacy
 
-- Only unread emails are read, and only their subject + first ~1000
-  characters of body are sent to whichever provider you've selected, to
-  pick a label.
+- Only the sender, subject, and Gmail's own ~200-character snippet are
+  sent to whichever provider you've selected, to pick a label. Full message
+  bodies are never fetched or transmitted.
+- Which emails are looked at is entirely up to the Scope you choose;
+  archived mail, Sent and Trash are never touched.
 - Your API key(s) live in `chrome.storage.sync` (tied to your Chrome
   profile) and are sent only to that provider's own API.
 - This is intended for personal/single-user use — the OAuth consent screen
@@ -118,9 +129,10 @@ a payment method on the account before the API will work at all.
 - **Nothing gets labeled at all / Clear Labels does nothing visible**:
   open `chrome://extensions/`, find this extension, click **service
   worker** to open its console, and check for errors there — that's
-  where actual failures (auth, API, permissions) get logged. Also note
-  only *unread* mail is ever processed; already-read mail is left alone
-  by design.
+  where actual failures (auth, API, permissions) get logged.
+- **Read emails aren't being labeled**: the default scope is "Unread only".
+  Switch the popup's *Scope* to "Inbox (read + unread)" and raise *Go back*
+  before clicking Group Emails.
 - **"bad client id" on sign-in**: your OAuth client ID (step 2/3 above)
   doesn't match this extension's current ID — reload the unpacked
   extension, confirm the ID, and re-check the client in Google Cloud

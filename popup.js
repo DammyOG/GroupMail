@@ -1,4 +1,11 @@
 import { getGmailService, clearToken, fetchUserProfile } from "./src/gmail_api.js";
+import {
+  SCOPES,
+  MAX_LIMIT,
+  getJobOptions,
+  saveJobOptions,
+  normalizeLimit,
+} from "./src/jobOptions.js";
 
 document.addEventListener("DOMContentLoaded", () => {
   const signInButton = document.getElementById("sign-in");
@@ -8,8 +15,22 @@ document.addEventListener("DOMContentLoaded", () => {
   const groupEmailsButton = document.getElementById("group-emails");
   const clearLabelsButton = document.getElementById("clear-labels");
   const clearAllButton = document.getElementById("clear-all");
+  const jobOptionsPanel = document.getElementById("job-options");
+  const scopeSelect = document.getElementById("scope");
+  const limitInput = document.getElementById("limit");
 
   let signedIn = false;
+
+  for (const [value, { label }] of Object.entries(SCOPES)) {
+    scopeSelect.add(new Option(label, value));
+  }
+  limitInput.max = MAX_LIMIT;
+
+  // Reopen the popup showing whatever the user chose last time.
+  getJobOptions().then(({ scope, limit }) => {
+    scopeSelect.value = scope;
+    limitInput.value = limit;
+  });
 
   settingsButton.addEventListener("click", () => {
     chrome.runtime.openOptionsPage();
@@ -26,6 +47,8 @@ document.addEventListener("DOMContentLoaded", () => {
     groupEmailsButton.disabled = !enabled;
     clearLabelsButton.disabled = !enabled;
     clearAllButton.disabled = !enabled;
+    scopeSelect.disabled = !enabled;
+    limitInput.disabled = !enabled;
   }
 
   // The actual work runs in the background service worker (background.js)
@@ -73,6 +96,7 @@ document.addEventListener("DOMContentLoaded", () => {
       await clearToken();
       signedIn = false;
       signInButton.style.display = "block";
+      jobOptionsPanel.style.display = "none";
       groupEmailsButton.style.display = "none";
       clearLabelsButton.style.display = "none";
       clearAllButton.style.display = "none";
@@ -86,10 +110,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
   signOutButton.addEventListener("click", signOut);
 
-  function startGrouping() {
+  async function startGrouping() {
+    const scope = scopeSelect.value;
+    // Snap the field to the value actually being used, so an out-of-range
+    // entry doesn't look like it was honoured.
+    const limit = normalizeLimit(limitInput.value);
+    limitInput.value = limit;
+
     messageDiv.textContent = "Starting...";
     setButtonsEnabled(false);
-    chrome.runtime.sendMessage({ type: "START_GROUPING" });
+    await saveJobOptions({ scope, limit });
+    chrome.runtime.sendMessage({ type: "START_GROUPING", scope, limit });
   }
 
   function startClear(maxLabelsToClear, maxEmailsPerLabel) {
@@ -122,6 +153,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     signInButton.style.display = "none";
     signOutButton.style.display = "block";
+    jobOptionsPanel.style.display = "grid";
     groupEmailsButton.style.display = "block";
     clearLabelsButton.style.display = "block";
     clearAllButton.style.display = "block";

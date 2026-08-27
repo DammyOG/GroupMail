@@ -13,6 +13,13 @@ import {
   addProcessedEmailIds,
   clearProcessedEmailIds,
 } from "./src/processedIds.js";
+import {
+  DEFAULT_LIMIT,
+  DEFAULT_SCOPE,
+  normalizeLimit,
+  normalizeScope,
+  queryForScope,
+} from "./src/jobOptions.js";
 
 // How many emails to classify concurrently. Each one costs a metadata
 // fetch plus one small model call; Gmail's per-user quota and both
@@ -122,7 +129,12 @@ async function pollForNewEmails(authToken) {
       return;
     }
 
-    const messages = await getEmails(authToken, "is:unread in:inbox");
+    // The poll is for mail that just arrived, so it stays unread-only no
+    // matter what scope the user picked for manual runs.
+    const messages = await getEmails(authToken, {
+      query: queryForScope("unread"),
+      limit: DEFAULT_LIMIT,
+    });
     if (messages.length === 0) {
       console.log("No new unread emails found.");
       return;
@@ -177,7 +189,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       // (in-memory guard flags reset to false on every fresh worker
       // spin-up, so a stale `running: true` is how we detect this).
       if (status.jobType === "GROUP" && !groupingInProgress) {
-        runGroupingJob();
+        runGroupingJob(status.scope ?? DEFAULT_SCOPE, status.limit ?? DEFAULT_LIMIT);
       } else if (status.jobType === "CLEAR" && !clearInProgress) {
         runClearJob(status.maxLabelsToClear ?? 250, status.maxEmailsPerLabel ?? 100);
       }
@@ -195,9 +207,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 
 let groupingInProgress = false;
 
-async function runGroupingJob() {
+async function runGroupingJob(rawScope, rawLimit) {
   if (groupingInProgress) return;
   groupingInProgress = true;
+
+  const scope = normalizeScope(rawScope);
+  const limit = normalizeLimit(rawLimit);
 
   try {
     const settings = await getSettings();
@@ -211,8 +226,19 @@ async function runGroupingJob() {
       return;
     }
 
+    // Recorded before the (potentially slow) listing call so that a
+    // worker recycle during it still resumes, and resumes with the same
+    // scope and limit the user actually chose.
+    await setJobStatus({
+      jobType: "GROUP",
+      running: true,
+      scope,
+      limit,
+      message: "Fetching emails...",
+    });
+
     const authToken = await getGmailService(false);
-    const emails = await getEmails(authToken);
+    const emails = await getEmails(authToken, { query: queryForScope(scope), limit });
     const processedEmailIds = await getProcessedEmailIds();
     const unprocessed = emails.filter((email) => !processedEmailIds.has(email.id));
 
@@ -220,7 +246,10 @@ async function runGroupingJob() {
       await setJobStatus({
         jobType: "GROUP",
         running: false,
-        message: emails.length === 0 ? "No unread emails found." : "All emails are already grouped.",
+        message:
+          emails.length === 0
+            ? "No matching emails found."
+            : "All emails in range are already grouped.",
       });
       return;
     }
@@ -254,6 +283,8 @@ async function runGroupingJob() {
         jobType: "GROUP",
         running: !stopReason,
         needsSettings: Boolean(stopReason),
+        scope,
+        limit,
         current: completed,
         total: unprocessed.length,
         message: stopReason || "Categorizing emails...",
@@ -399,7 +430,7 @@ async function runClearJob(maxLabelsToClear, maxEmailsPerLabel) {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === "START_GROUPING") {
-    runGroupingJob();
+    runGroupingJob(message.scope, message.limit);
     sendResponse({ started: true });
   } else if (message?.type === "CLEAR_LABELS") {
     runClearJob(message.maxLabelsToClear, message.maxEmailsPerLabel);

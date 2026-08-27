@@ -12,18 +12,38 @@ export async function getGmailService(interactive = true) {
   });
 }
 
-export async function getEmails(authToken, query = "is:unread") {
-  const response = await fetch(
-    "https://www.googleapis.com/gmail/v1/users/me/messages" +
-      `?q=${encodeURIComponent(query)}&maxResults=50`,
-    {
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
+// Gmail caps a single list call at 500 ids, so anything larger has to be
+// paged. Returns at most `limit` message ids, newest first.
+export async function getEmails(authToken, { query = "is:unread", limit = 50 } = {}) {
+  const messages = [];
+  let pageToken = null;
+
+  do {
+    const params = new URLSearchParams({
+      q: query,
+      maxResults: String(Math.min(500, limit - messages.length)),
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await fetch(
+      `https://www.googleapis.com/gmail/v1/users/me/messages?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to list emails: ${response.statusText}`);
     }
-  );
-  const data = await response.json();
-  return data.messages || [];
+
+    const data = await response.json();
+    messages.push(...(data.messages || []));
+    pageToken = data.nextPageToken;
+  } while (pageToken && messages.length < limit);
+
+  return messages.slice(0, limit);
 }
 
 // Clear the cached token

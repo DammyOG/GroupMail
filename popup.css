@@ -66,3 +66,54 @@ h2 {
     font-size: 18px;
     color: #333;
 }
+
+/* Run options (scope + how far back), shown only once signed in. */
+.options {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 8px 10px;
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border-radius: 5px;
+    background-color: #fff;
+    font-size: 14px;
+    color: #333;
+}
+
+.options label {
+    white-space: nowrap;
+}
+
+.options select,
+.options input {
+    padding: 6px 8px;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background-color: #fff;
+    color: #333;
+}
+
+.options select {
+    width: 100%;
+}
+
+.limit-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.limit-field input {
+    width: 80px;
+}
+
+.options :disabled {
+    background-color: #eceff1;
+    color: #78909c;
+    cursor: not-allowed;
+}
