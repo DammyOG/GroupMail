@@ -1,5 +1,5 @@
 import {
-  addLabelToEmail,
+  addLabelToEmails,
   createLabel,
   getEmailDetails,
   getEmails,
@@ -14,13 +14,11 @@ import {
   clearProcessedEmailIds,
 } from "./src/processedIds.js";
 
-// How many emails to label concurrently. Gmail and OpenAI both comfortably
-// handle this; keeping it modest avoids bursty rate-limit errors.
-const BATCH_SIZE = 5;
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// How many emails to classify concurrently. Each one costs a metadata
+// fetch plus one small model call; Gmail's per-user quota and both
+// providers' rate limits absorb this comfortably, and 429s are retried
+// with backoff rather than avoided by going slowly.
+const BATCH_SIZE = 15;
 
 function setJobStatus(status) {
   return new Promise((resolve) => {
@@ -33,27 +31,83 @@ async function buildLabelCache(authToken) {
   return new Map(labels.map((label) => [label.name, label.id]));
 }
 
+// In-flight label creations, keyed by label name. Shared across jobs so
+// the auto-poll and a manual job can't both POST the same brand-new
+// label and have Gmail reject the loser.
+const labelCreationsInFlight = new Map();
+
 async function resolveLabelId(authToken, labelCache, labelName) {
   if (labelCache.has(labelName)) return labelCache.get(labelName);
-  const newLabel = await createLabel(authToken, labelName);
-  labelCache.set(labelName, newLabel.id);
-  return newLabel.id;
+
+  if (!labelCreationsInFlight.has(labelName)) {
+    labelCreationsInFlight.set(labelName, createLabelIfMissing(authToken, labelName));
+  }
+
+  try {
+    const labelId = await labelCreationsInFlight.get(labelName);
+    labelCache.set(labelName, labelId);
+    return labelId;
+  } finally {
+    labelCreationsInFlight.delete(labelName);
+  }
 }
 
-// Labels a single email. Shared by the periodic auto-poll and the manual
-// "Group Emails" job triggered from the popup. `labelCache` is a
-// name->id Map built once per job so we don't refetch Gmail's whole
-// label list for every email.
-async function labelSingleEmail(authToken, emailId, labelCache) {
-  const emailDetails = await getEmailDetails(authToken, emailId);
-  if (!emailDetails) return null;
+async function createLabelIfMissing(authToken, labelName) {
+  try {
+    const created = await createLabel(authToken, labelName);
+    return created.id;
+  } catch (error) {
+    if (!error.alreadyExists) throw error;
 
-  const { subject, body } = emailDetails;
-  const label = await suggestLabel(subject, body);
-  const labelId = await resolveLabelId(authToken, labelCache, label);
-  await addLabelToEmail(authToken, emailId, labelId);
+    const existing = (await listLabels(authToken)).find((l) => l.name === labelName);
+    if (!existing) throw error;
+    return existing.id;
+  }
+}
 
-  return { subject, label };
+// Classifies one email without touching Gmail's label state — applying
+// the labels is deferred so a whole batch can go up in one batchModify
+// call per label instead of one modify call per email.
+async function classifyEmail(authToken, emailId) {
+  const email = await getEmailDetails(authToken, emailId);
+  return { id: emailId, label: await suggestLabel(email) };
+}
+
+// Classifies `emails` concurrently, then applies the results grouped by
+// label. Returns the IDs that made it all the way through, so callers
+// only ever mark genuinely-labeled mail as processed.
+async function labelEmailBatch(authToken, emails, labelCache) {
+  const classified = await Promise.all(
+    emails.map(async (email) => {
+      try {
+        return await classifyEmail(authToken, email.id);
+      } catch (error) {
+        console.error(`Error classifying email ${email.id}:`, error);
+        return { id: email.id, error };
+      }
+    })
+  );
+
+  const idsByLabel = new Map();
+  for (const result of classified) {
+    if (result.error) continue;
+    if (!idsByLabel.has(result.label)) idsByLabel.set(result.label, []);
+    idsByLabel.get(result.label).push(result.id);
+  }
+
+  const labeledIds = [];
+  for (const [labelName, ids] of idsByLabel) {
+    try {
+      const labelId = await resolveLabelId(authToken, labelCache, labelName);
+      await addLabelToEmails(authToken, ids, labelId);
+      labeledIds.push(...ids);
+    } catch (error) {
+      console.error(`Error applying label "${labelName}":`, error);
+    }
+  }
+
+  const firstError = classified.find((result) => result.error)?.error;
+  return { labeledIds, failed: emails.length - labeledIds.length, firstError };
 }
 
 // ---------------------------------------------------------------------
@@ -68,41 +122,26 @@ async function pollForNewEmails(authToken) {
       return;
     }
 
-    const response = await fetch(
-      "https://www.googleapis.com/gmail/v1/users/me/messages?q=is:unread&labelIds=INBOX",
-      {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      }
-    );
-
-    const data = await response.json();
-    if (!data.messages || data.messages.length === 0) {
+    const messages = await getEmails(authToken, "is:unread in:inbox");
+    if (messages.length === 0) {
       console.log("No new unread emails found.");
       return;
     }
 
     const processedEmailIds = await getProcessedEmailIds();
-    const unprocessed = data.messages.filter((m) => !processedEmailIds.includes(m.id));
+    const unprocessed = messages.filter((m) => !processedEmailIds.has(m.id));
     if (unprocessed.length === 0) return;
 
     const labelCache = await buildLabelCache(authToken);
-    const doneIds = [];
 
-    for (const message of unprocessed) {
-      try {
-        const result = await labelSingleEmail(authToken, message.id, labelCache);
-        if (result) {
-          console.log(`Grouped email "${result.subject}" under label "${result.label}".`);
-        }
-      } catch (error) {
-        console.error(`Error processing new email with ID ${message.id}:`, error);
-      }
-      doneIds.push(message.id);
+    for (let i = 0; i < unprocessed.length; i += BATCH_SIZE) {
+      const batch = unprocessed.slice(i, i + BATCH_SIZE);
+      const { labeledIds } = await labelEmailBatch(authToken, batch, labelCache);
+
+      // Only successes are recorded. Anything that failed stays
+      // unprocessed so the next poll picks it up again.
+      await addProcessedEmailIds(labeledIds);
     }
-
-    await addProcessedEmailIds(doneIds);
   } catch (error) {
     console.error("Error polling for new emails:", error);
   }
@@ -175,7 +214,7 @@ async function runGroupingJob() {
     const authToken = await getGmailService(false);
     const emails = await getEmails(authToken);
     const processedEmailIds = await getProcessedEmailIds();
-    const unprocessed = emails.filter((email) => !processedEmailIds.includes(email.id));
+    const unprocessed = emails.filter((email) => !processedEmailIds.has(email.id));
 
     if (unprocessed.length === 0) {
       await setJobStatus({
@@ -195,28 +234,20 @@ async function runGroupingJob() {
 
     for (let i = 0; i < unprocessed.length && !stopReason; i += BATCH_SIZE) {
       const batch = unprocessed.slice(i, i + BATCH_SIZE);
-      const batchDoneIds = [];
+      const result = await labelEmailBatch(authToken, batch, labelCache);
 
-      await Promise.all(
-        batch.map(async (email) => {
-          try {
-            await labelSingleEmail(authToken, email.id, labelCache);
-            batchDoneIds.push(email.id);
-            succeeded++;
-          } catch (error) {
-            console.error(`Error labeling email ${email.id}:`, error);
-            failed++;
-            if (/API key/i.test(error.message) && !stopReason) {
-              stopReason = error.message;
-            }
-          } finally {
-            completed++;
-          }
-        })
-      );
+      if (result.labeledIds.length > 0) {
+        await addProcessedEmailIds(result.labeledIds);
+      }
 
-      if (batchDoneIds.length > 0) {
-        await addProcessedEmailIds(batchDoneIds);
+      succeeded += result.labeledIds.length;
+      failed += result.failed;
+      completed += batch.length;
+
+      // A bad API key fails every email identically — stop rather than
+      // grind through the rest of the mailbox producing the same error.
+      if (result.firstError && /API key/i.test(result.firstError.message)) {
+        stopReason = result.firstError.message;
       }
 
       await setJobStatus({
@@ -227,10 +258,6 @@ async function runGroupingJob() {
         total: unprocessed.length,
         message: stopReason || "Categorizing emails...",
       });
-
-      if (!stopReason && i + BATCH_SIZE < unprocessed.length) {
-        await delay(250); // light courtesy pause between batches
-      }
     }
 
     if (!stopReason) {

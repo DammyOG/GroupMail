@@ -12,9 +12,10 @@ export async function getGmailService(interactive = true) {
   });
 }
 
-export async function getEmails(authToken) {
+export async function getEmails(authToken, query = "is:unread") {
   const response = await fetch(
-    "https://www.googleapis.com/gmail/v1/users/me/messages?q=is:unread&maxResults=50",
+    "https://www.googleapis.com/gmail/v1/users/me/messages" +
+      `?q=${encodeURIComponent(query)}&maxResults=50`,
     {
       headers: {
         Authorization: `Bearer ${authToken}`,
@@ -63,9 +64,14 @@ export async function fetchUserProfile(token) {
   }
 }
 
+// Fetches only what the classifier needs: sender, subject, and Gmail's
+// own ~200-char snippet. `format=metadata` skips the base64 message
+// bodies and attachment payloads entirely, which is by far the largest
+// part of a `format=full` response.
 export async function getEmailDetails(authToken, id) {
   const response = await fetch(
-    `https://www.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
+    `https://www.googleapis.com/gmail/v1/users/me/messages/${id}` +
+      "?format=metadata&metadataHeaders=Subject&metadataHeaders=From",
     {
       headers: {
         Authorization: `Bearer ${authToken}`,
@@ -73,32 +79,22 @@ export async function getEmailDetails(authToken, id) {
     }
   );
 
-  if (!response.ok) throw new Error("Failed to fetch email details");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch email ${id}: ${response.statusText}`);
+  }
 
   const message = await response.json();
+  const headers = message.payload?.headers || [];
 
-  const headers = message.payload.headers || [];
-  const subject =
-    headers.find((header) => header.name === "Subject")?.value || "No Subject";
+  // Gmail is not guaranteed to preserve header name casing.
+  const header = (name) =>
+    headers.find((h) => h.name.toLowerCase() === name)?.value?.trim() || "";
 
-  const plainTextPart = message.payload.parts?.find(
-    (part) => part.mimeType === "text/plain"
-  );
-
-  const htmlPart = message.payload.parts?.find(
-    (part) => part.mimeType === "text/html"
-  );
-
-  const body = plainTextPart
-    ? atob(plainTextPart.body.data.replace(/-/g, "+").replace(/_/g, "/"))
-    : htmlPart
-    ? atob(htmlPart.body.data.replace(/-/g, "+").replace(/_/g, "/"))
-    : "No Content";
-
-  const truncatedBody =
-    body.length > 1000 ? `${body.substring(0, 1000)}...` : body;
-
-  return { subject, body: truncatedBody };
+  return {
+    from: header("from") || "Unknown Sender",
+    subject: header("subject") || "No Subject",
+    snippet: message.snippet || "",
+  };
 }
 
 // Fetch the full label list once. Callers that need to resolve many
@@ -140,17 +136,27 @@ export async function createLabel(authToken, labelName) {
   );
 
   if (!createResponse.ok) {
-    const error = await createResponse.json();
-    console.error("Failed to create label:", error);
-    throw new Error(`Failed to create label: ${createResponse.statusText}`);
+    const error = new Error(
+      `Failed to create label "${labelName}": ${createResponse.statusText}`
+    );
+    // Gmail answers 409 when the label already exists — either the user
+    // made it by hand or a concurrent job won the race. Callers can
+    // recover from that by looking the existing label up.
+    error.alreadyExists = createResponse.status === 409;
+    throw error;
   }
 
   return createResponse.json();
 }
 
-export async function addLabelToEmail(authToken, emailId, labelId) {
+// Applies one label to many messages in a single request, instead of one
+// modify call per email. Gmail caps batchModify at 1000 ids per call and
+// returns 204 No Content on success.
+export async function addLabelToEmails(authToken, emailIds, labelId) {
+  if (emailIds.length === 0) return;
+
   const response = await fetch(
-    `https://www.googleapis.com/gmail/v1/users/me/messages/${emailId}/modify`,
+    "https://www.googleapis.com/gmail/v1/users/me/messages/batchModify",
     {
       method: "POST",
       headers: {
@@ -158,16 +164,15 @@ export async function addLabelToEmail(authToken, emailId, labelId) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        addLabelIds: [labelId], // Label to add
+        ids: emailIds,
+        addLabelIds: [labelId],
       }),
     }
   );
 
   if (!response.ok) {
-    const error = await response.json();
-    console.error("Error modifying email:", error);
     throw new Error(
-      `Failed to add label to email ${emailId}: ${response.statusText}`
+      `Failed to label ${emailIds.length} email(s): ${response.statusText}`
     );
   }
 }

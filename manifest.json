@@ -5,7 +5,7 @@
   "description": "Organize Gmail emails into groups based on content, using AI-suggested labels.",
   "permissions": ["identity", "storage", "alarms"],
   "oauth2": {
-    "client_id": "YOUR_GOOGLE_OAUTH_CLIENT_ID.apps.googleusercontent.com",
+    "client_id": "169400956954-e6cf2f91vkhru8v7t8mp4p17gctdmg31.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.profile",
       "https://www.googleapis.com/auth/gmail.labels",

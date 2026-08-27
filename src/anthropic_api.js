@@ -1,24 +1,23 @@
-import { predefinedLabels, FALLBACK_LABEL, buildLabelPrompt } from "./labels.js";
+import {
+  FALLBACK_LABEL,
+  buildLabelPrompt,
+  normalizeLabel,
+} from "./labels.js";
+import { NonRetryableError, RetryableError, withRetries } from "./retry.js";
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function suggestLabelAnthropic(subject, body, { anthropicApiKey, anthropicModel }) {
+export async function suggestLabelAnthropic(email, { anthropicApiKey, anthropicModel }) {
   if (!anthropicApiKey) {
-    throw new Error(
+    throw new NonRetryableError(
       "No Anthropic API key configured. Open the extension's Settings page and add one."
     );
   }
 
-  const prompt = buildLabelPrompt(subject, body);
+  const prompt = buildLabelPrompt(email);
 
-  let retryCount = 0;
-  const maxRetries = 3;
-
-  while (retryCount <= maxRetries) {
+  const rawLabel = await withRetries(async () => {
+    let response;
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -35,41 +34,44 @@ export async function suggestLabelAnthropic(subject, body, { anthropicApiKey, an
           messages: [{ role: "user", content: prompt }],
         }),
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        const label = data.content?.[0]?.text?.trim();
-
-        if (predefinedLabels.includes(label)) {
-          return label;
-        } else {
-          console.warn("Unexpected label received, defaulting to fallback");
-          return FALLBACK_LABEL;
-        }
-      } else if (response.status === 401) {
-        throw new Error(
-          "Anthropic rejected the API key (401). Check the key in Settings."
-        );
-      } else if (response.status === 429) {
-        console.warn("Rate limit exceeded. Retrying...");
-        const retryAfter =
-          parseInt(response.headers.get("retry-after"), 10) || 1000;
-        await delay(retryAfter);
-        retryCount++;
-      } else {
-        const errorBody = await response.text();
-        throw new Error(`Anthropic API Error: ${response.statusText} - ${errorBody}`);
-      }
-    } catch (error) {
-      if (retryCount === maxRetries) {
-        console.error("Max retries reached. Failing...");
-        throw error;
-      }
-      console.warn("Retrying after error:", error);
-      await delay(1000);
-      retryCount++;
+    } catch (networkError) {
+      throw new RetryableError(`Network error reaching Anthropic: ${networkError.message}`);
     }
+
+    if (response.ok) {
+      const data = await response.json();
+      return data.content?.[0]?.text;
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new NonRetryableError(
+        "Anthropic rejected the API key (401/403). Check the key in Settings."
+      );
+    }
+
+    if (response.status === 400) {
+      throw new NonRetryableError(
+        `Anthropic rejected the request: ${await response.text()}`
+      );
+    }
+
+    if (response.status === 429) {
+      // Retry-After is in seconds per the HTTP spec.
+      const retryAfterSeconds = parseInt(response.headers.get("retry-after"), 10);
+      throw new RetryableError(
+        "Anthropic rate limit hit.",
+        Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : undefined
+      );
+    }
+
+    throw new RetryableError(`Anthropic API error ${response.status}: ${response.statusText}`);
+  });
+
+  const label = normalizeLabel(rawLabel);
+  if (!label) {
+    console.warn(`Off-list label from Anthropic: ${JSON.stringify(rawLabel)}`);
+    return FALLBACK_LABEL;
   }
 
-  throw new Error("Failed to process request after retries.");
+  return label;
 }

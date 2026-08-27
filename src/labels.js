@@ -56,15 +56,31 @@ export const predefinedLabels = [
 
 export const FALLBACK_LABEL = "Updates";
 
-export function buildLabelPrompt(subject, body) {
-  return `
-      Here is an email:
-      Subject: ${subject}
-      Body: ${body}
+// Case-insensitive lookup so a model answering "work" or "Work." still
+// lands on the real label instead of silently falling back to Updates.
+const labelsByLowercaseName = new Map(
+  predefinedLabels.map((label) => [label.toLowerCase(), label])
+);
 
-      Based on the content, select the **most appropriate** label from this predefined list:
-      ${predefinedLabels.join(", ")}.
+// Returns the canonical label, or null if the model answered with
+// something genuinely off-list.
+export function normalizeLabel(rawLabel) {
+  if (!rawLabel) return null;
 
-      Only respond with a single label from the list. Do not generate new labels.
-    `;
+  const cleaned = rawLabel.trim().replace(/^["'`]+|["'`.\s]+$/g, "");
+  return labelsByLowercaseName.get(cleaned.toLowerCase()) || null;
+}
+
+// Sender is the single strongest signal for most of these categories
+// (a bank, an airline, a recruiter), so it goes first in the prompt.
+export function buildLabelPrompt({ from, subject, snippet }) {
+  return `Email:
+From: ${from}
+Subject: ${subject}
+Preview: ${snippet}
+
+Choose the single most appropriate label from this list:
+${predefinedLabels.join(", ")}
+
+Respond with the label only. Do not explain, and do not invent new labels.`;
 }
