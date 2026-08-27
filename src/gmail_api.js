@@ -1,5 +1,3 @@
-import { suggestLabel } from "./openai_api.js";
-
 export async function getGmailService(interactive = true) {
   return new Promise((resolve, reject) => {
     chrome.identity.getAuthToken({ interactive }, (token) => {

@@ -26,6 +26,7 @@
   "host_permissions": [
     "https://www.googleapis.com/*",
     "https://people.googleapis.com/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://api.anthropic.com/*"
   ]
 }

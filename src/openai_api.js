@@ -1,82 +1,17 @@
-import { getSettings } from "./storage.js";
+import { predefinedLabels, FALLBACK_LABEL, buildLabelPrompt } from "./labels.js";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Expanded predefined labels for more precise categorization
-const predefinedLabels = [
-  "Work",
-  "Personal",
-  "Family",
-  "Friends",
-  "Finance",
-  "Banking",
-  "Bills",
-  "Investments",
-  "Job Applications",
-  "Taxes",
-  "Shopping",
-  "Receipts",
-  "Promotions",
-  "Coupons",
-  "Newsletters",
-  "Social Media",
-  "LinkedIn",
-  "Twitter",
-  "Facebook",
-  "Travel",
-  "Flights",
-  "Hotels",
-  "Car Rentals",
-  "Healthcare",
-  "Medical Bills",
-  "Appointments",
-  "Insurance",
-  "Subscriptions",
-  "Entertainment",
-  "Movies",
-  "Music",
-  "Streaming Services",
-  "Online Courses",
-  "Education",
-  "School",
-  "University",
-  "Tech",
-  "Software Updates",
-  "Security Alerts",
-  "Customer Support",
-  "Spam",
-  "Scam Alerts",
-  "Important",
-  "To-Do",
-  "Follow-Up",
-  "Events",
-  "Meetings",
-  "Deadlines",
-  "Updates",
-  "Random",
-];
-
-export async function suggestLabel(subject, body) {
-  const { openaiApiKey, model } = await getSettings();
-
+export async function suggestLabelOpenAI(subject, body, { openaiApiKey, openaiModel }) {
   if (!openaiApiKey) {
     throw new Error(
       "No OpenAI API key configured. Open the extension's Settings page and add one."
     );
   }
 
-  const prompt = `
-      Here is an email:
-      Subject: ${subject}
-      Body: ${body}
-
-      Based on the content, select the **most appropriate** label from this predefined list:
-      ${predefinedLabels.join(", ")}.
-
-      Only respond with a single label from the list. Do not generate new labels.
-    `;
+  const prompt = buildLabelPrompt(subject, body);
 
   let retryCount = 0;
   const maxRetries = 3;
@@ -92,7 +27,7 @@ export async function suggestLabel(subject, body) {
             Authorization: `Bearer ${openaiApiKey}`,
           },
           body: JSON.stringify({
-            model: model || "gpt-4o-mini",
+            model: openaiModel || "gpt-4o-mini",
             messages: [{ role: "user", content: prompt }],
             max_tokens: 10,
           }),
@@ -103,12 +38,11 @@ export async function suggestLabel(subject, body) {
         const data = await response.json();
         const label = data.choices[0].message.content.trim();
 
-        // Ensure the response is a valid label from our predefined list
         if (predefinedLabels.includes(label)) {
           return label;
         } else {
-          console.warn("Unexpected label received, defaulting to 'Updates'");
-          return "Updates"; // Default fallback label
+          console.warn("Unexpected label received, defaulting to fallback");
+          return FALLBACK_LABEL;
         }
       } else if (response.status === 401) {
         throw new Error(

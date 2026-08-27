@@ -60,15 +60,25 @@ Open `manifest.json` and replace the placeholder:
 with the client ID from step 2. Then go back to `chrome://extensions/` and
 click the reload icon on the extension.
 
-### 4. Add your OpenAI API key
+### 4. Add an API key
 
-1. Get a key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+The extension can classify emails using either OpenAI or Anthropic
+(Claude) — pick whichever you have an account for.
+
+1. Get a key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+   (OpenAI) or [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
+   (Anthropic). Note: an Anthropic API key is separate from a claude.ai
+   chat subscription and billed separately, even if you already pay for
+   Claude Pro/Max.
 2. Click the extension icon, then click **Settings**.
-3. Paste your key, pick a model (defaults to `gpt-4o-mini`), and click
-   **Save**.
+3. Pick a provider from the dropdown, paste the matching key, and click
+   **Save**. Both providers' keys can be saved at once — switching the
+   dropdown later doesn't require re-entering anything.
 
-Note: OpenAI bills you per API call. `gpt-4o-mini` is cheap and works well
-for this kind of short classification task.
+Both providers are cheap for this kind of short classification task
+(a fraction of a cent per email with the default models,
+`gpt-4o-mini` / `claude-haiku-4-5`), but neither is free — both require
+a payment method on the account before the API will work at all.
 
 ### 5. Use it
 
@@ -85,17 +95,36 @@ for this kind of short classification task.
 - Vanilla JavaScript (ES modules), no build step
 - Chrome Extension Manifest V3 (`chrome.identity`, `chrome.storage`, `chrome.alarms`)
 - Gmail API + Google People API
-- OpenAI Chat Completions API
+- OpenAI Chat Completions API or Anthropic Messages API (your choice)
 
 ## 🔒 Notes on data & privacy
 
 - Only unread emails are read, and only their subject + first ~1000
-  characters of body are sent to OpenAI to pick a label.
-- Your OpenAI key lives in `chrome.storage.sync` (tied to your Chrome
-  profile) and is sent only to `api.openai.com`.
+  characters of body are sent to whichever provider you've selected, to
+  pick a label.
+- Your API key(s) live in `chrome.storage.sync` (tied to your Chrome
+  profile) and are sent only to that provider's own API.
 - This is intended for personal/single-user use — the OAuth consent screen
   stays in "Testing" mode, limited to accounts you explicitly add as test
   users.
+
+## 🩹 Troubleshooting
+
+- **"All emails are already grouped" but Gmail shows no labels**: the
+  extension tracks which email IDs it has already processed locally, and
+  that tracking can drift out of sync with Gmail's real state (e.g. after
+  testing, or if a job was interrupted oddly). Open **Settings → Reset
+  tracked emails** to clear that memory and force a fresh pass.
+- **Nothing gets labeled at all / Clear Labels does nothing visible**:
+  open `chrome://extensions/`, find this extension, click **service
+  worker** to open its console, and check for errors there — that's
+  where actual failures (auth, API, permissions) get logged. Also note
+  only *unread* mail is ever processed; already-read mail is left alone
+  by design.
+- **"bad client id" on sign-in**: your OAuth client ID (step 2/3 above)
+  doesn't match this extension's current ID — reload the unpacked
+  extension, confirm the ID, and re-check the client in Google Cloud
+  Console.
 
 ## 📜 License
 

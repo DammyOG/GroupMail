@@ -6,8 +6,8 @@ import {
   getGmailService,
   listLabels,
 } from "./src/gmail_api.js";
-import { suggestLabel } from "./src/openai_api.js";
-import { getSettings } from "./src/storage.js";
+import { suggestLabel } from "./src/labelProvider.js";
+import { getSettings, hasActiveProviderKey } from "./src/storage.js";
 import {
   getProcessedEmailIds,
   addProcessedEmailIds,
@@ -62,9 +62,9 @@ async function labelSingleEmail(authToken, emailId, labelCache) {
 
 async function pollForNewEmails(authToken) {
   try {
-    const { openaiApiKey } = await getSettings();
-    if (!openaiApiKey) {
-      console.log("No OpenAI API key configured yet; skipping auto-poll.");
+    const settings = await getSettings();
+    if (!hasActiveProviderKey(settings)) {
+      console.log("No API key configured yet; skipping auto-poll.");
       return;
     }
 
@@ -161,13 +161,13 @@ async function runGroupingJob() {
   groupingInProgress = true;
 
   try {
-    const { openaiApiKey } = await getSettings();
-    if (!openaiApiKey) {
+    const settings = await getSettings();
+    if (!hasActiveProviderKey(settings)) {
       await setJobStatus({
         jobType: "GROUP",
         running: false,
         needsSettings: true,
-        message: "No OpenAI API key configured. Open Settings to add one.",
+        message: "No API key configured. Open Settings to add one.",
       });
       return;
     }

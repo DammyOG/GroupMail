@@ -1,26 +1,52 @@
 import { getSettings, saveSettings } from "./src/storage.js";
+import { getProcessedEmailIds, clearProcessedEmailIds } from "./src/processedIds.js";
 
 const form = document.getElementById("settings-form");
-const apiKeyInput = document.getElementById("api-key");
-const modelSelect = document.getElementById("model");
+const providerSelect = document.getElementById("provider");
+const openaiApiKeyInput = document.getElementById("openai-api-key");
+const openaiModelSelect = document.getElementById("openai-model");
+const anthropicApiKeyInput = document.getElementById("anthropic-api-key");
+const anthropicModelSelect = document.getElementById("anthropic-model");
 const status = document.getElementById("status");
 
+const resetButton = document.getElementById("reset-tracking");
+const resetStatus = document.getElementById("reset-status");
+
 async function load() {
-  const { openaiApiKey, model } = await getSettings();
-  apiKeyInput.value = openaiApiKey || "";
-  modelSelect.value = model || "gpt-4o-mini";
+  const settings = await getSettings();
+  providerSelect.value = settings.provider;
+  openaiApiKeyInput.value = settings.openaiApiKey || "";
+  openaiModelSelect.value = settings.openaiModel;
+  anthropicApiKeyInput.value = settings.anthropicApiKey || "";
+  anthropicModelSelect.value = settings.anthropicModel;
+  await refreshResetStatus();
+}
+
+async function refreshResetStatus() {
+  const ids = await getProcessedEmailIds();
+  resetStatus.textContent = `Currently tracking ${ids.length} email(s) as already grouped.`;
 }
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   await saveSettings({
-    openaiApiKey: apiKeyInput.value.trim(),
-    model: modelSelect.value,
+    provider: providerSelect.value,
+    openaiApiKey: openaiApiKeyInput.value.trim(),
+    openaiModel: openaiModelSelect.value,
+    anthropicApiKey: anthropicApiKeyInput.value.trim(),
+    anthropicModel: anthropicModelSelect.value,
   });
   status.textContent = "Settings saved.";
   setTimeout(() => {
     status.textContent = "";
   }, 2000);
+});
+
+resetButton.addEventListener("click", async () => {
+  await clearProcessedEmailIds();
+  await refreshResetStatus();
+  const original = resetStatus.textContent;
+  resetStatus.textContent = "Tracking reset. " + original;
 });
 
 load();

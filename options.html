@@ -10,15 +10,36 @@
     <h1>Group Mail Settings</h1>
 
     <form id="settings-form">
-        <label for="api-key">OpenAI API key</label>
-        <input type="password" id="api-key" placeholder="sk-..." autocomplete="off">
-
-        <label for="model">Model</label>
-        <select id="model">
-            <option value="gpt-4o-mini">gpt-4o-mini (recommended, cheapest)</option>
-            <option value="gpt-4o">gpt-4o</option>
-            <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+        <label for="provider">AI provider used to label emails</label>
+        <select id="provider">
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (Claude)</option>
         </select>
+
+        <fieldset>
+            <legend>OpenAI</legend>
+            <label for="openai-api-key">OpenAI API key</label>
+            <input type="password" id="openai-api-key" placeholder="sk-..." autocomplete="off">
+
+            <label for="openai-model">Model</label>
+            <select id="openai-model">
+                <option value="gpt-4o-mini">gpt-4o-mini (recommended, cheapest)</option>
+                <option value="gpt-4o">gpt-4o</option>
+                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+            </select>
+        </fieldset>
+
+        <fieldset>
+            <legend>Anthropic (Claude)</legend>
+            <label for="anthropic-api-key">Anthropic API key</label>
+            <input type="password" id="anthropic-api-key" placeholder="sk-ant-..." autocomplete="off">
+
+            <label for="anthropic-model">Model</label>
+            <select id="anthropic-model">
+                <option value="claude-haiku-4-5">Claude Haiku 4.5 (recommended, cheapest)</option>
+                <option value="claude-sonnet-5">Claude Sonnet 5</option>
+            </select>
+        </fieldset>
 
         <button type="submit">Save</button>
     </form>
@@ -26,15 +47,31 @@
     <p id="status"></p>
 
     <p class="hint">
-        Your API key is stored locally in your Chrome profile
-        (<code>chrome.storage.sync</code>) and is only ever sent to
-        OpenAI's API when labeling an email. It is never committed to
-        this repository or sent anywhere else.
+        Whichever key you fill in is only used when its provider is
+        selected above. Keys are stored locally in your Chrome profile
+        (<code>chrome.storage.sync</code>) and only ever sent to that
+        provider's own API. Get an OpenAI key at
+        <span>platform.openai.com/api-keys</span>, or an Anthropic key at
+        <span>console.anthropic.com/settings/keys</span> — note this is
+        separate from a claude.ai chat subscription and billed
+        separately. Usage is billed by the provider based on how many
+        emails you label.
     </p>
+
+    <hr>
+
+    <h2>Reset tracking</h2>
     <p class="hint">
-        Get a key from <span>platform.openai.com/api-keys</span>. Usage
-        is billed by OpenAI based on how many emails you label.
+        The extension remembers which emails it has already labeled so it
+        doesn't relabel them. If it's telling you emails are "already
+        grouped" when they don't actually have a label in Gmail, that
+        memory has drifted out of sync — reset it below. This does not
+        touch anything in Gmail; it only clears the extension's local
+        memory, so the next "Group Emails" run will re-check every
+        unread email from scratch.
     </p>
+    <button type="button" id="reset-tracking">Reset tracked emails</button>
+    <p id="reset-status"></p>
 
     <script type="module" src="options.js"></script>
 </body>
