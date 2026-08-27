@@ -1,17 +1,22 @@
 import {
   addLabelToEmail,
+  createLabel,
   getEmailDetails,
   getEmails,
   getGmailService,
-  getOrCreateLabel,
+  listLabels,
 } from "./src/gmail_api.js";
 import { suggestLabel } from "./src/openai_api.js";
 import { getSettings } from "./src/storage.js";
 import {
   getProcessedEmailIds,
-  addProcessedEmailId,
+  addProcessedEmailIds,
   clearProcessedEmailIds,
 } from "./src/processedIds.js";
+
+// How many emails to label concurrently. Gmail and OpenAI both comfortably
+// handle this; keeping it modest avoids bursty rate-limit errors.
+const BATCH_SIZE = 5;
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -23,15 +28,29 @@ function setJobStatus(status) {
   });
 }
 
+async function buildLabelCache(authToken) {
+  const labels = await listLabels(authToken);
+  return new Map(labels.map((label) => [label.name, label.id]));
+}
+
+async function resolveLabelId(authToken, labelCache, labelName) {
+  if (labelCache.has(labelName)) return labelCache.get(labelName);
+  const newLabel = await createLabel(authToken, labelName);
+  labelCache.set(labelName, newLabel.id);
+  return newLabel.id;
+}
+
 // Labels a single email. Shared by the periodic auto-poll and the manual
-// "Group Emails" job triggered from the popup.
-async function labelSingleEmail(authToken, emailId) {
+// "Group Emails" job triggered from the popup. `labelCache` is a
+// name->id Map built once per job so we don't refetch Gmail's whole
+// label list for every email.
+async function labelSingleEmail(authToken, emailId, labelCache) {
   const emailDetails = await getEmailDetails(authToken, emailId);
   if (!emailDetails) return null;
 
   const { subject, body } = emailDetails;
   const label = await suggestLabel(subject, body);
-  const labelId = await getOrCreateLabel(authToken, label);
+  const labelId = await resolveLabelId(authToken, labelCache, label);
   await addLabelToEmail(authToken, emailId, labelId);
 
   return { subject, label };
@@ -65,23 +84,25 @@ async function pollForNewEmails(authToken) {
     }
 
     const processedEmailIds = await getProcessedEmailIds();
+    const unprocessed = data.messages.filter((m) => !processedEmailIds.includes(m.id));
+    if (unprocessed.length === 0) return;
 
-    for (const message of data.messages) {
-      if (processedEmailIds.includes(message.id)) {
-        continue;
-      }
+    const labelCache = await buildLabelCache(authToken);
+    const doneIds = [];
 
+    for (const message of unprocessed) {
       try {
-        const result = await labelSingleEmail(authToken, message.id);
+        const result = await labelSingleEmail(authToken, message.id, labelCache);
         if (result) {
           console.log(`Grouped email "${result.subject}" under label "${result.label}".`);
         }
       } catch (error) {
         console.error(`Error processing new email with ID ${message.id}:`, error);
       }
-
-      await addProcessedEmailId(message.id);
+      doneIds.push(message.id);
     }
+
+    await addProcessedEmailIds(doneIds);
   } catch (error) {
     console.error("Error polling for new emails:", error);
   }
@@ -90,6 +111,11 @@ async function pollForNewEmails(authToken) {
 chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create("firstOn", { when: Date.now() + 60000 });
   chrome.alarms.create("pollEmails", { periodInMinutes: 15 });
+  // Chrome forcibly recycles the service worker roughly every 30s of
+  // activity, which can cut a big manual job off mid-batch. This alarm
+  // wakes up about once a minute and silently continues any job that
+  // got interrupted, so the user never has to babysit or re-click.
+  chrome.alarms.create("resumeJobs", { periodInMinutes: 1 });
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
@@ -101,12 +127,31 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       console.log("Skipping auto-poll (not signed in):", error.message);
     }
   }
+
+  if (alarm.name === "resumeJobs") {
+    chrome.storage.local.get("jobStatus", (result) => {
+      const status = result.jobStatus;
+      if (!status || !status.running) return;
+
+      // If `running` is still true here, the worker that was processing
+      // this job got killed before it could write a final status update
+      // (in-memory guard flags reset to false on every fresh worker
+      // spin-up, so a stale `running: true` is how we detect this).
+      if (status.jobType === "GROUP" && !groupingInProgress) {
+        runGroupingJob();
+      } else if (status.jobType === "CLEAR" && !clearInProgress) {
+        runClearJob(status.maxLabelsToClear ?? 250, status.maxEmailsPerLabel ?? 100);
+      }
+    });
+  }
 });
 
 // ---------------------------------------------------------------------
 // Manual "Group Emails" job, triggered from the popup. Runs entirely in
 // the service worker so it keeps going even if the popup closes (Chrome
-// tears down the popup's JS the instant it loses focus).
+// tears down the popup's JS the instant it loses focus). Emails are
+// labeled in small concurrent batches, and the resumeJobs alarm above
+// picks it back up automatically if the worker gets recycled mid-job.
 // ---------------------------------------------------------------------
 
 let groupingInProgress = false;
@@ -141,57 +186,60 @@ async function runGroupingJob() {
       return;
     }
 
+    const labelCache = await buildLabelCache(authToken);
+
+    let completed = 0;
     let succeeded = 0;
     let failed = 0;
+    let stopReason = null;
 
-    for (let i = 0; i < unprocessed.length; i++) {
-      const { id } = unprocessed[i];
+    for (let i = 0; i < unprocessed.length && !stopReason; i += BATCH_SIZE) {
+      const batch = unprocessed.slice(i, i + BATCH_SIZE);
+      const batchDoneIds = [];
+
+      await Promise.all(
+        batch.map(async (email) => {
+          try {
+            await labelSingleEmail(authToken, email.id, labelCache);
+            batchDoneIds.push(email.id);
+            succeeded++;
+          } catch (error) {
+            console.error(`Error labeling email ${email.id}:`, error);
+            failed++;
+            if (/API key/i.test(error.message) && !stopReason) {
+              stopReason = error.message;
+            }
+          } finally {
+            completed++;
+          }
+        })
+      );
+
+      if (batchDoneIds.length > 0) {
+        await addProcessedEmailIds(batchDoneIds);
+      }
 
       await setJobStatus({
         jobType: "GROUP",
-        running: true,
-        current: i + 1,
+        running: !stopReason,
+        needsSettings: Boolean(stopReason),
+        current: completed,
         total: unprocessed.length,
-        message: `Categorizing email ${i + 1} of ${unprocessed.length}...`,
+        message: stopReason || "Categorizing emails...",
       });
 
-      try {
-        const result = await labelSingleEmail(authToken, id);
-        await addProcessedEmailId(id);
-        succeeded++;
-
-        await setJobStatus({
-          jobType: "GROUP",
-          running: true,
-          current: i + 1,
-          total: unprocessed.length,
-          message: result
-            ? `Labeled "${result.subject}" as "${result.label}"`
-            : `Processed email ${i + 1} of ${unprocessed.length}`,
-        });
-      } catch (error) {
-        console.error(`Error labeling email ${id}:`, error);
-        failed++;
-
-        if (/API key/i.test(error.message)) {
-          await setJobStatus({
-            jobType: "GROUP",
-            running: false,
-            needsSettings: true,
-            message: error.message,
-          });
-          return;
-        }
+      if (!stopReason && i + BATCH_SIZE < unprocessed.length) {
+        await delay(250); // light courtesy pause between batches
       }
-
-      await delay(1000); // stay under OpenAI/Gmail rate limits
     }
 
-    await setJobStatus({
-      jobType: "GROUP",
-      running: false,
-      message: `Done. Labeled ${succeeded}, failed ${failed}.`,
-    });
+    if (!stopReason) {
+      await setJobStatus({
+        jobType: "GROUP",
+        running: false,
+        message: `Done. Labeled ${succeeded}, failed ${failed}.`,
+      });
+    }
   } catch (error) {
     console.error("Grouping job failed:", error);
     await setJobStatus({
@@ -206,7 +254,7 @@ async function runGroupingJob() {
 
 // ---------------------------------------------------------------------
 // Manual "Clear Labels" / "Clear All" job, also run in the background
-// for the same reason.
+// for the same reason, with the same auto-resume support.
 // ---------------------------------------------------------------------
 
 const CORE_LABELS = [
@@ -238,17 +286,7 @@ async function runClearJob(maxLabelsToClear, maxEmailsPerLabel) {
   try {
     await clearProcessedEmailIds();
     const authToken = await getGmailService(false);
-
-    const response = await fetch("https://www.googleapis.com/gmail/v1/users/me/labels", {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch labels: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    const labels = data.labels || [];
+    const labels = await listLabels(authToken);
 
     const labelsToProcess = labels
       .filter((label) => label.type === "user" && !CORE_LABELS.includes(label.name.toUpperCase()))
@@ -270,6 +308,8 @@ async function runClearJob(maxLabelsToClear, maxEmailsPerLabel) {
         running: true,
         current: i + 1,
         total: labelsToProcess.length,
+        maxLabelsToClear,
+        maxEmailsPerLabel,
         message: `Processing label: ${label.name}`,
       });
 

@@ -11,10 +11,18 @@ export async function getProcessedEmailIds() {
 }
 
 export async function addProcessedEmailId(id) {
+  return addProcessedEmailIds([id]);
+}
+
+// Batch form: takes one read-modify-write round trip for a whole group of
+// IDs instead of one per ID, which also avoids the lost-update race that
+// happens when several addProcessedEmailId() calls run concurrently.
+export async function addProcessedEmailIds(ids) {
+  if (ids.length === 0) return;
   const processedIds = await getProcessedEmailIds();
-  processedIds.push(id);
+  const merged = Array.from(new Set([...processedIds, ...ids]));
   return new Promise((resolve) => {
-    chrome.storage.local.set({ processedEmailIds: processedIds }, resolve);
+    chrome.storage.local.set({ processedEmailIds: merged }, resolve);
   });
 }
 

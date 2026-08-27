@@ -103,29 +103,10 @@ export async function getEmailDetails(authToken, id) {
   return { subject, body: truncatedBody };
 }
 
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-export async function suggestLabelWithRateLimiting(subject, body) {
-  await delay(1000); // Add a delay of 1 second between requests
-  return await suggestLabel(subject, body);
-}
-
-const RESERVED_LABELS = [
-  "INBOX",
-  "SPAM",
-  "TRASH",
-  "IMPORTANT",
-  "CATEGORY_PERSONAL",
-  "CATEGORY_SOCIAL",
-  "CATEGORY_PROMOTIONS",
-  "CATEGORY_UPDATES",
-  "CATEGORY_FORUMS",
-];
-
-export async function getOrCreateLabel(authToken, labelName) {
-  // Fetch existing labels
+// Fetch the full label list once. Callers that need to resolve many
+// label names (a whole batch job) should call this once and cache the
+// result instead of re-fetching per email.
+export async function listLabels(authToken) {
   const response = await fetch(
     "https://www.googleapis.com/gmail/v1/users/me/labels",
     {
@@ -135,30 +116,15 @@ export async function getOrCreateLabel(authToken, labelName) {
     }
   );
 
+  if (!response.ok) {
+    throw new Error(`Failed to fetch labels: ${response.statusText}`);
+  }
+
   const data = await response.json();
-  const existingLabel = data.labels?.find((label) => label.name === labelName);
+  return data.labels || [];
+}
 
-  if (existingLabel) {
-    console.log(`Found existing label: ${labelName} (${existingLabel.id})`);
-    return existingLabel.id; // Return the ID of the existing label
-  }
-
-  // Check if the label name is reserved
-  const isReservedLabel = RESERVED_LABELS.includes(labelName.toUpperCase());
-  if (isReservedLabel) {
-    console.log(`"${labelName}" is a reserved label.`);
-    const reservedLabel = data.labels?.find(
-      (label) => label.name.toUpperCase() === labelName.toUpperCase()
-    );
-    if (reservedLabel) {
-      return reservedLabel.id; // Return the ID of the reserved label
-    } else {
-      throw new Error(`Cannot use reserved label name: ${labelName}`);
-    }
-  }
-
-  // Create a new label
-  console.log(`Creating new label: ${labelName}`);
+export async function createLabel(authToken, labelName) {
   const createResponse = await fetch(
     "https://www.googleapis.com/gmail/v1/users/me/labels",
     {
@@ -181,9 +147,7 @@ export async function getOrCreateLabel(authToken, labelName) {
     throw new Error(`Failed to create label: ${createResponse.statusText}`);
   }
 
-  const newLabel = await createResponse.json();
-  console.log(`Created new label: ${labelName} (${newLabel.id})`);
-  return newLabel.id;
+  return createResponse.json();
 }
 
 export async function addLabelToEmail(authToken, emailId, labelId) {
