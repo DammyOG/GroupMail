@@ -54,11 +54,26 @@ document.addEventListener("DOMContentLoaded", () => {
   // The actual work runs in the background service worker (background.js)
   // so it keeps going even if this popup loses focus and gets torn down.
   // This just reflects whatever the background worker last reported.
+  function describeAge(finishedAt) {
+    const minutes = Math.floor((Date.now() - finishedAt) / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
+  }
+
   function renderJobStatus(status) {
     if (!status) return;
 
+    // A stored status records the LAST run, not necessarily anything
+    // happening now — it outlives popup closes, extension reloads, and
+    // settings changes. Saying how old it is stops a stale failure from
+    // being mistaken for a live one.
+    const age = status.finishedAt ? ` — last run, ${describeAge(status.finishedAt)}` : "";
+
     if (status.needsSettings) {
-      showOpenSettingsPrompt(status.message);
+      showOpenSettingsPrompt(`${status.message}${age}`);
       setButtonsEnabled(true);
       return;
     }
@@ -68,7 +83,7 @@ document.addEventListener("DOMContentLoaded", () => {
       messageDiv.textContent = `${status.message}${progress}`;
       setButtonsEnabled(false);
     } else {
-      messageDiv.textContent = status.message;
+      messageDiv.textContent = `${status.message}${age}`;
       setButtonsEnabled(true);
     }
   }

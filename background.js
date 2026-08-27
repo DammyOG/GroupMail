@@ -29,8 +29,13 @@ import {
 const BATCH_SIZE = 15;
 
 function setJobStatus(status) {
+  // A finished status is kept so the popup can show the outcome of a run
+  // that ended while it was closed. Stamping it lets the popup say how
+  // old it is, so a past failure doesn't read as a live one.
+  const stamped = status.running ? status : { ...status, finishedAt: Date.now() };
+
   return new Promise((resolve) => {
-    chrome.storage.local.set({ jobStatus: status }, resolve);
+    chrome.storage.local.set({ jobStatus: stamped }, resolve);
   });
 }
 

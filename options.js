@@ -26,7 +26,7 @@ function checkWorkerIsCurrent() {
 
     staleWorkerBanner.hidden = false;
     staleWorkerBanner.textContent =
-      `The background worker is running older code (${workerBuild || "pre-2026-08-27.4"}) ` +
+      `The background worker is running older code (${workerBuild || "pre-2026-08-27.5"}) ` +
       `than this page (${BUILD_ID}), so changes saved here will not affect labeling. ` +
       `Open chrome://extensions and click Reload on Gmail Group, then reopen Settings.`;
   });
@@ -59,6 +59,11 @@ form.addEventListener("submit", async (event) => {
     anthropicModel: anthropicModelSelect.value,
     anthropicWorkspaceId: anthropicWorkspaceIdInput.value.trim(),
   });
+  // Any previous "fix your settings" verdict was about the old
+  // configuration. Leaving it in place makes the popup keep replaying an
+  // error the user has just addressed.
+  await new Promise((resolve) => chrome.storage.local.remove("jobStatus", resolve));
+
   status.textContent = "Settings saved.";
   setTimeout(() => {
     status.textContent = "";
