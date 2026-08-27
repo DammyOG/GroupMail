@@ -9,4 +9,4 @@
 //
 // The Settings page asks the worker for its BUILD_ID and compares it
 // against its own, turning that invisible mismatch into a banner.
-export const BUILD_ID = "2026-08-27.5";
+export const BUILD_ID = "2026-08-27.6";

@@ -139,6 +139,11 @@ a payment method on the account before the API will work at all.
   **Workspace ID**, and save. Find it in the Console under Settings
   &rarr; Workspaces. Leave the field blank for ordinary
   workspace-scoped keys.
+- **`Failed to create label "X"` in the worker console**: Gmail reserves
+  certain label names (Spam, Important, Inbox, Trash, Starred, Sent,
+  Draft, Unread, Chat) and refuses to create a user label using one. The
+  taxonomy avoids these, and anything else Gmail rejects falls back to
+  the `Updates` label rather than losing the email.
 - **"bad client id" on sign-in**: your OAuth client ID (step 2/3 above)
   doesn't match this extension's current ID — reload the unpacked
   extension, confirm the ID, and re-check the client in Google Cloud

@@ -26,7 +26,7 @@ function checkWorkerIsCurrent() {
 
     staleWorkerBanner.hidden = false;
     staleWorkerBanner.textContent =
-      `The background worker is running older code (${workerBuild || "pre-2026-08-27.5"}) ` +
+      `The background worker is running older code (${workerBuild || "pre-2026-08-27.6"}) ` +
       `than this page (${BUILD_ID}), so changes saved here will not affect labeling. ` +
       `Open chrome://extensions and click Reload on Gmail Group, then reopen Settings.`;
   });

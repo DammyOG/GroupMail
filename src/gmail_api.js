@@ -156,13 +156,24 @@ export async function createLabel(authToken, labelName) {
   );
 
   if (!createResponse.ok) {
+    // statusText is empty over HTTP/2, so the status code and Gmail's own
+    // message are the only useful diagnostics here.
+    const body = await createResponse.text();
     const error = new Error(
-      `Failed to create label "${labelName}": ${createResponse.statusText}`
+      `Failed to create label "${labelName}" (HTTP ${createResponse.status}): ${body}`
     );
+
     // Gmail answers 409 when the label already exists — either the user
     // made it by hand or a concurrent job won the race. Callers can
     // recover from that by looking the existing label up.
     error.alreadyExists = createResponse.status === 409;
+
+    // 400 on label creation means Gmail will not accept this name at all
+    // — most often because it collides with a reserved system label such
+    // as Spam, Important or Inbox. Retrying cannot help; callers should
+    // route these emails somewhere else instead.
+    error.nameRejected = createResponse.status === 400;
+
     throw error;
   }
 

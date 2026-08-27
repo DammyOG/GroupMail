@@ -7,6 +7,7 @@ import {
   listLabels,
 } from "./src/gmail_api.js";
 import { suggestLabel } from "./src/labelProvider.js";
+import { FALLBACK_LABEL } from "./src/labels.js";
 import { getSettings, hasActiveProviderKey } from "./src/storage.js";
 import {
   getProcessedEmailIds,
@@ -65,6 +66,34 @@ async function resolveLabelId(authToken, labelCache, labelName) {
   }
 }
 
+// Names Gmail has refused outright this session. Remembered so a whole
+// job doesn't re-attempt a creation that cannot succeed, once per batch.
+const rejectedLabelNames = new Set();
+
+// Gmail reserves a set of label names (Spam, Important, Inbox and
+// friends) and rejects any attempt to create a user label using one. The
+// taxonomy avoids the ones we know about, but rather than lose those
+// emails to a failed creation, anything Gmail refuses falls back to the
+// generic label.
+async function resolveLabelIdOrFallback(authToken, labelCache, labelName) {
+  if (rejectedLabelNames.has(labelName)) {
+    return resolveLabelId(authToken, labelCache, FALLBACK_LABEL);
+  }
+
+  try {
+    return await resolveLabelId(authToken, labelCache, labelName);
+  } catch (error) {
+    if (!error.nameRejected) throw error;
+
+    rejectedLabelNames.add(labelName);
+    console.warn(
+      `Gmail will not accept a label named "${labelName}" (likely reserved); ` +
+        `using "${FALLBACK_LABEL}" for these emails instead.`
+    );
+    return resolveLabelId(authToken, labelCache, FALLBACK_LABEL);
+  }
+}
+
 async function createLabelIfMissing(authToken, labelName) {
   try {
     const created = await createLabel(authToken, labelName);
@@ -111,7 +140,7 @@ async function labelEmailBatch(authToken, emails, labelCache) {
   const labeledIds = [];
   for (const [labelName, ids] of idsByLabel) {
     try {
-      const labelId = await resolveLabelId(authToken, labelCache, labelName);
+      const labelId = await resolveLabelIdOrFallback(authToken, labelCache, labelName);
       await addLabelToEmails(authToken, ids, labelId);
       labeledIds.push(...ids);
     } catch (error) {
